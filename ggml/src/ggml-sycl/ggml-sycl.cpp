@@ -32,9 +32,7 @@
 
 #include <sycl/sycl.hpp>
 #include <sycl/backend.hpp>
-#ifdef GGML_SYCL_SUPPORT_LEVEL_ZERO_API
-#include <level_zero/ze_api.h>
-#endif
+#include "l0_wrapper.hpp"
 #if defined(GGML_SYCL_GRAPH) && SYCL_EXT_ONEAPI_ASYNC_MEMORY_ALLOC
 #    include <sycl/ext/oneapi/experimental/async_alloc/async_alloc.hpp>
 #endif
@@ -157,15 +155,11 @@ static ggml_sycl_device_info ggml_sycl_init() {
             info.ext_oneapi_level_zero = false;
         }
 
-#ifdef GGML_SYCL_SUPPORT_LEVEL_ZERO_API
-        if (info.ext_oneapi_level_zero && device.is_gpu() && device.default_queue().get_backend() == sycl::backend::ext_oneapi_level_zero) {
-            ze_device_handle_t ze_dev = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(device.default_queue().get_device());
-            ze_device_properties_t props = {};
-            props.stype = ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES;
-            ze_result_t r = zeDeviceGetProperties(ze_dev, &props);
-            info.devices[i].l0_discrete_gpu = r == ZE_RESULT_SUCCESS && !(props.flags & ZE_DEVICE_PROPERTY_FLAG_INTEGRATED);
+        if (info.ext_oneapi_level_zero && device.is_gpu() && l0::is_backend_available(device.default_queue())) {
+            auto ze_dev = l0::get_native_device(device.default_queue().get_device());
+            auto props = l0::get_device_properties(ze_dev);
+            info.devices[i].l0_discrete_gpu = props.discrete_gpu;
         }
-#endif
     }
 
     for (int id = 0; id < info.device_count; ++id) {
@@ -602,38 +596,28 @@ catch (sycl::exception const &exc) {
   std::exit(1);
 }
 
-#ifdef GGML_SYCL_SUPPORT_LEVEL_ZERO_API
 static bool ggml_sycl_is_l0_discrete_gpu(int device) {
     return ggml_sycl_info().devices[device].l0_discrete_gpu;
 }
-#endif
 
 static void dev2dev_memcpy(int device_dst, sycl::queue &q_dst, int device_src, sycl::queue &q_src, void *ptr_dst,
                     const void *ptr_src, size_t size) {
 
-#ifdef GGML_SYCL_SUPPORT_LEVEL_ZERO_API
     if (g_ggml_sycl_dev2dev_memcpy == DEV2DEV_MEMCPY_L0) {
         // Use Level Zero direct copy for dGPU-to-dGPU transfers.
         const bool l0_copy_supported =
             ggml_sycl_is_l0_discrete_gpu(device_dst) && ggml_sycl_is_l0_discrete_gpu(device_src);
         if (g_ggml_sycl_use_level_zero_api && l0_copy_supported) {
-            auto ze_ctx = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(q_dst.get_context());
-            auto ze_dev = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(q_dst.get_device());
-            ze_command_queue_desc_t cq_desc = {ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC, nullptr, 0, 0,
-                                            0, ZE_COMMAND_QUEUE_MODE_SYNCHRONOUS, ZE_COMMAND_QUEUE_PRIORITY_NORMAL};
-            ze_command_list_handle_t cl;
-            ze_result_t r = zeCommandListCreateImmediate(ze_ctx, ze_dev, &cq_desc, &cl);
-            if (r == ZE_RESULT_SUCCESS) {
+            auto ze_ctx = l0::get_native_context(q_dst.get_context());
+            auto ze_dev = l0::get_native_device(q_dst.get_device());
+            auto cl = l0::create_immediate_cmdlist(ze_ctx, ze_dev);
+            if (cl) {
                 GGML_SYCL_DEBUG("[SYCL] dev2dev memcpy by L0\n");
-                r = zeCommandListAppendMemoryCopy(cl, ptr_dst, ptr_src, size, nullptr, 0, nullptr);
-                zeCommandListDestroy(cl);
-                if (r == ZE_RESULT_SUCCESS) {
-                    return;
-                }
+                l0::append_memory_copy(cl, ptr_dst, ptr_src, size);
+                l0::destroy_cmdlist(cl);
             }
         }
     }
-#endif
 
     if (g_ggml_sycl_dev2dev_memcpy == DEV2DEV_MEMCPY_SYCL) {
         if (q_dst.get_device().ext_oneapi_can_access_peer(q_src.get_device(),

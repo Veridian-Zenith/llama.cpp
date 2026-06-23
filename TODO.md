@@ -1,5 +1,14 @@
 # TODO -- SYCL/Level Zero Bridge Optimization
 
+## Done
+
+- [x] **l0_wrapper refactor (Sprint 0):** Created `ggml/src/ggml-sycl/l0_wrapper.{hpp,cpp}`.
+  All 5 existing Level Zero call sites (`zeMemAllocDevice`, `zeMemFree`,
+  `zeDeviceGetProperties`, `zeCommandListCreateImmediate`,
+  `zeCommandListAppendMemoryCopy`) migrated behind a `l0::` namespace.
+  No direct `ze_*` calls remain in `common.cpp` or `ggml-sycl.cpp`.
+  Builds clean with `icpx` on `GGML_SYCL=ON`. No logic changes.
+
 ## 1. Profile Prompt-Processing to Token-Generation Handoff
 
 - [ ] Trace `ggml_sycl_compute_forward()` dispatch path in `ggml/src/ggml-sycl/ggml-sycl.cpp:3601-5130` and measure latency per op type during handoff boundary
@@ -91,12 +100,15 @@
 ### 7.1 Centralize Shared Utilities
 
 - [ ] Move `sycl_ex::async_malloc` / `sycl_ex::async_free` from `ggml-sycl.cpp:407-435` into `common.cpp` for reuse across all op files
-- [ ] Extract Level Zero wrapper layer into `ggml/src/ggml-sycl/l0_wrapper.hpp` / `l0_wrapper.cpp`:
+- [x] Extract Level Zero wrapper layer into `ggml/src/ggml-sycl/l0_wrapper.hpp` / `l0_wrapper.cpp`:
   - `l0::mem_alloc_device(size_t)` wrapping `zeMemAllocDevice` + `zeMemFree`
   - `l0::mem_copy_device(ptr_dst, ptr_src, size)` wrapping `zeCommandListAppendMemoryCopy`
   - `l0::device_properties(dev)` wrapping `zeDeviceGetProperties`
   - `l0::create_immediate_cmdlist(ctx, dev)` wrapping `zeCommandListCreateImmediate`
   - `l0::event_create(ctx)` / `l0::event_sync(event)` wrapping `zeEventCreate` / `zeEventHostSynchronize`
+    - **Status**: `l0_wrapper` created with 9 functions covering all existing L0 call sites.
+      `common.cpp` and `ggml-sycl.cpp` migrated. All 6 `ze_*` symbols now isolated to
+      `l0_wrapper.cpp.o` only. Build verified (icpx, GGML_SYCL=ON).
 - [ ] Centralize device info struct: `sycl_device_info` at `common.hpp:225-270` currently duplicated or referenced inconsistently
 
 ### 7.2 Reduce Boilerplate
@@ -166,6 +178,8 @@
 | `ggml/src/ggml-sycl/ggml-sycl.cpp` | VMM allocation | 5501-5954 |
 | `ggml/src/ggml-sycl/common.hpp` | Device info struct | 225-270 |
 | `ggml/src/ggml-sycl/common.cpp` | Level Zero mem alloc/free | 95-133 |
+| `ggml/src/ggml-sycl/l0_wrapper.hpp` | Level Zero abstraction layer | all |
+| `ggml/src/ggml-sycl/l0_wrapper.cpp` | Level Zero wrapper implementation | all |
 | `ggml/src/ggml-sycl/CMakeLists.txt` | Level Zero SDK detection | 108-117 |
 | `ggml/CMakeLists.txt` | SYCL option definitions | 248-257 |
 | `docs/backend/SYCL.md` | Level Zero API documentation | 762-777 |
