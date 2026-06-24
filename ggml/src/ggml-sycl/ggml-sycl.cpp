@@ -78,6 +78,7 @@
 
 static bool g_sycl_loaded = false;
 int g_ggml_sycl_debug = 0;
+int g_ggml_sycl_trace = 0;
 int g_ggml_sycl_disable_optimize = 0;
 int g_ggml_sycl_disable_graph = 0;
 int g_ggml_sycl_disable_dnn = 0;
@@ -264,6 +265,7 @@ static void ggml_check_sycl() try {
 
     if (!initialized) {
         g_ggml_sycl_debug = ggml_sycl_get_env("GGML_SYCL_DEBUG", 0);
+        g_ggml_sycl_trace = ggml_sycl_get_env("GGML_SYCL_TRACE", 0);
         g_ggml_sycl_disable_optimize = ggml_sycl_get_env("GGML_SYCL_DISABLE_OPT", 0);
         g_ggml_sycl_disable_graph = ggml_sycl_get_env("GGML_SYCL_DISABLE_GRAPH", 1);
         g_ggml_sycl_disable_dnn = ggml_sycl_get_env("GGML_SYCL_DISABLE_DNN", 0);
@@ -319,6 +321,7 @@ static void ggml_check_sycl() try {
 
         GGML_LOG_INFO("Running with Environment Variables:\n");
         GGML_LOG_INFO("  GGML_SYCL_DEBUG: %d\n", g_ggml_sycl_debug);
+        GGML_LOG_INFO("  GGML_SYCL_TRACE: %d\n", g_ggml_sycl_trace);
         GGML_LOG_INFO("  GGML_SYCL_DISABLE_OPT: %d\n", g_ggml_sycl_disable_optimize);
 #ifdef GGML_SYCL_GRAPH
         GGML_LOG_INFO("  GGML_SYCL_DISABLE_GRAPH: %d\n", g_ggml_sycl_disable_graph);
@@ -533,9 +536,12 @@ ggml_backend_sycl_buffer_init_tensor(ggml_backend_buffer_t buffer,
         size_t padded_size = ggml_backend_buft_get_alloc_size(buffer->buft, tensor);
 
         if (padded_size > original_size && tensor->view_src == nullptr) {
-            SYCL_CHECK(CHECK_TRY_ERROR(ctx->stream->memset(
-                (char *)tensor->data + original_size, 0,
-                padded_size - original_size).wait()));
+            {
+                GGML_SYCL_TRACE_SCOPE("init_tensor.padding_memset");
+                SYCL_CHECK(CHECK_TRY_ERROR(ctx->stream->memset(
+                    (char *)tensor->data + original_size, 0,
+                    padded_size - original_size).wait()));
+            }
         }
     }
     return GGML_STATUS_SUCCESS;
@@ -562,10 +568,16 @@ static void ggml_backend_sycl_buffer_set_tensor(ggml_backend_buffer_t buffer,
     // This function will be called during load model from disk. Use memory buffer replace dynamic won't save more time and brings potential memory leak risk here.
     char * host_buf = (char *) malloc(size);
     memcpy(host_buf, data, size);
-    SYCL_CHECK(CHECK_TRY_ERROR((*stream).memcpy((char *) tensor->data + offset, host_buf, size).wait()));
+    {
+        GGML_SYCL_TRACE_SCOPE("set_tensor.memcpy_h2d");
+        SYCL_CHECK(CHECK_TRY_ERROR((*stream).memcpy((char *) tensor->data + offset, host_buf, size).wait()));
+    }
     free(host_buf);
 #else
-    SYCL_CHECK(CHECK_TRY_ERROR((*stream).memcpy((char *) tensor->data + offset, data, size).wait()));
+    {
+        GGML_SYCL_TRACE_SCOPE("set_tensor.memcpy_h2d");
+        SYCL_CHECK(CHECK_TRY_ERROR((*stream).memcpy((char *) tensor->data + offset, data, size).wait()));
+    }
 #endif
 }
 catch (sycl::exception const &exc) {
@@ -586,9 +598,12 @@ static void ggml_backend_sycl_buffer_get_tensor(ggml_backend_buffer_t buffer,
     ggml_sycl_set_device(ctx->device);
     auto stream = dpct::dev_mgr::instance().get_device(ctx->device).default_queue();
 
-    SYCL_CHECK(CHECK_TRY_ERROR(
-        stream.memcpy(data, (const char *)tensor->data + offset, size)
-            .wait()));
+    {
+        GGML_SYCL_TRACE_SCOPE("get_tensor.memcpy_d2h");
+        SYCL_CHECK(CHECK_TRY_ERROR(
+            stream.memcpy(data, (const char *)tensor->data + offset, size)
+                .wait()));
+    }
 }
 catch (sycl::exception const &exc) {
   std::cerr << exc.what() << "Exception caught at file:" << __FILE__
@@ -613,7 +628,10 @@ static void dev2dev_memcpy(int device_dst, sycl::queue &q_dst, int device_src, s
             auto cl = l0::create_immediate_cmdlist(ze_ctx, ze_dev);
             if (cl) {
                 GGML_SYCL_DEBUG("[SYCL] dev2dev memcpy by L0\n");
-                l0::append_memory_copy(cl, ptr_dst, ptr_src, size);
+                {
+                    GGML_SYCL_TRACE_SCOPE("dev2dev.memcpy_l0_zeCommandListAppendMemoryCopy");
+                    l0::append_memory_copy(cl, ptr_dst, ptr_src, size);
+                }
                 l0::destroy_cmdlist(cl);
             }
         }
@@ -623,7 +641,10 @@ static void dev2dev_memcpy(int device_dst, sycl::queue &q_dst, int device_src, s
         if (q_dst.get_device().ext_oneapi_can_access_peer(q_src.get_device(),
                                                           sycl::ext::oneapi::peer_access::access_supported)) {
             GGML_SYCL_DEBUG("[SYCL] dev2dev memcpy by SYCL\n");
-            SYCL_CHECK(CHECK_TRY_ERROR(q_dst.memcpy(ptr_dst, ptr_src, size).wait()));
+            {
+                GGML_SYCL_TRACE_SCOPE("dev2dev.memcpy_sycl");
+                SYCL_CHECK(CHECK_TRY_ERROR(q_dst.memcpy(ptr_dst, ptr_src, size).wait()));
+            }
             return;
         }
     }
@@ -631,8 +652,14 @@ static void dev2dev_memcpy(int device_dst, sycl::queue &q_dst, int device_src, s
     // Host-staged copy
     GGML_SYCL_DEBUG("[SYCL] dev2dev memcpy by host forward\n");
     char *host_buf = (char *)malloc(size);
-    q_src.memcpy(host_buf, (const char *)ptr_src, size).wait();
-    q_dst.memcpy((char *)ptr_dst, host_buf, size).wait();
+    {
+        GGML_SYCL_TRACE_SCOPE("dev2dev.memcpy_host_src");
+        q_src.memcpy(host_buf, (const char *)ptr_src, size).wait();
+    }
+    {
+        GGML_SYCL_TRACE_SCOPE("dev2dev.memcpy_host_dst");
+        q_dst.memcpy((char *)ptr_dst, host_buf, size).wait();
+    }
     free(host_buf);
 }
 
@@ -713,11 +740,14 @@ static void ggml_backend_sycl_buffer_clear(ggml_backend_buffer_t buffer,
     constexpr size_t MAX_CHUNK = 2ULL << 30;  // 2 GiB
     for (size_t off = 0; off < buffer->size; off += MAX_CHUNK) {
         size_t chunk = std::min(buffer->size - off, MAX_CHUNK);
-        SYCL_CHECK(CHECK_TRY_ERROR(
-            (*stream)
-                .memset(static_cast<char*>(ctx->dev_ptr) + off, value, chunk)
-                .wait()
-        ));
+        {
+            GGML_SYCL_TRACE_SCOPE("clear.memset");
+            SYCL_CHECK(CHECK_TRY_ERROR(
+                (*stream)
+                    .memset(static_cast<char*>(ctx->dev_ptr) + off, value, chunk)
+                    .wait()
+            ));
+        }
     }
 }
 catch (sycl::exception const &exc) {
@@ -742,7 +772,10 @@ static void ggml_backend_sycl_buffer_memset_tensor(ggml_backend_buffer_t buffer,
     }
     void * target_ptr = static_cast<char *>(tensor->data) + offset;
     SYCL_CHECK(CHECK_TRY_ERROR((*stream).memset(target_ptr, value, size)));
-    SYCL_CHECK(CHECK_TRY_ERROR((*stream).wait()));
+    {
+        GGML_SYCL_TRACE_SCOPE("memset_tensor.stream.wait");
+        SYCL_CHECK(CHECK_TRY_ERROR((*stream).wait()));
+    }
 }
 
 static void ggml_backend_sycl_buffer_reset(ggml_backend_buffer_t buffer) {
@@ -1095,10 +1128,13 @@ ggml_backend_sycl_split_buffer_init_tensor(ggml_backend_buffer_t buffer,
             the error codes. The original code was commented out and a warning
             string was inserted. You need to rewrite this code.
             */
-            SYCL_CHECK(CHECK_TRY_ERROR(
-                (*stream)
-                    .memset(buf + original_size, 0, size - original_size)
-                    .wait()));
+            {
+                GGML_SYCL_TRACE_SCOPE("split_init.padding_memset");
+                SYCL_CHECK(CHECK_TRY_ERROR(
+                    (*stream)
+                        .memset(buf + original_size, 0, size - original_size)
+                        .wait()));
+            }
         }
 
         extra->data_device[i] = buf;
@@ -1166,10 +1202,13 @@ ggml_backend_sycl_split_buffer_set_tensor(ggml_backend_buffer_t buffer,
         */
         ggml_sycl_set_device(i);
         const queue_ptr stream = ctx->streams[i];
-        SYCL_CHECK(CHECK_TRY_ERROR(
-            (*stream)
-                .memcpy(extra->data_device[i], buf_host, original_size)
-                .wait()));
+        {
+            GGML_SYCL_TRACE_SCOPE("split_set_tensor.memcpy_h2d");
+            SYCL_CHECK(CHECK_TRY_ERROR(
+                (*stream)
+                    .memcpy(extra->data_device[i], buf_host, original_size)
+                    .wait()));
+        }
     }
 }
 catch (sycl::exception const &exc) {
@@ -1222,10 +1261,13 @@ ggml_backend_sycl_split_buffer_get_tensor(ggml_backend_buffer_t buffer,
         */
         ggml_sycl_set_device(i);
         const queue_ptr stream = ctx->streams[i];
-        SYCL_CHECK(CHECK_TRY_ERROR(
-            (*stream)
-                .memcpy(buf_host, extra->data_device[i], original_size)
-                .wait()));
+        {
+            GGML_SYCL_TRACE_SCOPE("split_get_tensor.memcpy_d2h");
+            SYCL_CHECK(CHECK_TRY_ERROR(
+                (*stream)
+                    .memcpy(buf_host, extra->data_device[i], original_size)
+                    .wait()));
+        }
     }
 }
 catch (sycl::exception const &exc) {
@@ -2992,11 +3034,14 @@ static void ggml_sycl_op_mul_mat(ggml_backend_sycl_context & ctx, const ggml_ten
                     if (i != ctx.device) {
                         if constexpr (quantize_enabled) {
                             char * src1_ddq_i_source = dev[ctx.device].src1_ddq + src1_ddq_i_offset;
-                            SYCL_CHECK(
-                                CHECK_TRY_ERROR(stream
-                                                    ->memcpy(src1_ddq_i, src1_ddq_i_source,
-                                                             src1_ncols * src1_padded_col_size * q8_1_ts / q8_1_bs)
-                                                    .wait()));
+                            {
+                                GGML_SYCL_TRACE_SCOPE("mul_mat.interdev_copy");
+                                SYCL_CHECK(
+                                    CHECK_TRY_ERROR(stream
+                                                        ->memcpy(src1_ddq_i, src1_ddq_i_source,
+                                                                 src1_ncols * src1_padded_col_size * q8_1_ts / q8_1_bs)
+                                                        .wait()));
+                            }
                         } else {
                             float * src1_ddf_i_source = (float *) src1_extra->data_device[ctx.device];
                             src1_ddf_i_source += (i0 * ne11 + src1_col_0) * ne10;
@@ -3059,9 +3104,12 @@ static void ggml_sycl_op_mul_mat(ggml_backend_sycl_context & ctx, const ggml_ten
                         float * dhf_dst_i = (float *) ((char *) dst_off_device + i02*nb2 + i03*nb3);
                         GGML_ASSERT(dst->nb[1] == ne0*sizeof(float));
                         dhf_dst_i += src1_col_0*ne0;
-                        SYCL_CHECK(CHECK_TRY_ERROR(
-                            stream->memcpy(dhf_dst_i, dst_dd_i,
-                                           src1_ncols * ne0 * sizeof(float)).wait()));
+                        {
+                            GGML_SYCL_TRACE_SCOPE("mul_mat.dst_copy");
+                            SYCL_CHECK(CHECK_TRY_ERROR(
+                                stream->memcpy(dhf_dst_i, dst_dd_i,
+                                               src1_ncols * ne0 * sizeof(float)).wait()));
+                        }
                     }
                 }
 
@@ -3634,6 +3682,7 @@ static bool reorder_qw_q4_0(uint8_t * data_device, const int ncols, const int nr
     sycl::event copy_event;
     SYCL_CHECK(CHECK_TRY_ERROR(copy_event = stream->memcpy(tmp_buf, data_device, size)));
     if (!g_ggml_sycl_use_async_mem_op) {
+        GGML_SYCL_TRACE_SCOPE("reorder.copy_event.wait");
         copy_event.wait();
     }
 
@@ -3656,6 +3705,7 @@ static bool reorder_qw_q4_0(uint8_t * data_device, const int ncols, const int nr
             *(d_ptr + ib) = x[ib].d;
         });
     if (!g_ggml_sycl_use_async_mem_op) {
+        GGML_SYCL_TRACE_SCOPE("reorder.reorder_event.wait");
         reorder_event.wait_and_throw();
     }
     return true;
@@ -3673,6 +3723,7 @@ static bool reorder_qw_q8_0(uint8_t * data_device, const int ncols, const int nr
     sycl::event copy_event;
     SYCL_CHECK(CHECK_TRY_ERROR(copy_event = stream->memcpy(tmp_buf, data_device, size)));
     if (!g_ggml_sycl_use_async_mem_op) {
+        GGML_SYCL_TRACE_SCOPE("reorder.copy_event.wait");
         copy_event.wait();
     }
 
@@ -3695,6 +3746,7 @@ static bool reorder_qw_q8_0(uint8_t * data_device, const int ncols, const int nr
             *(d_ptr + ib) = x[ib].d;
         });
     if (!g_ggml_sycl_use_async_mem_op) {
+        GGML_SYCL_TRACE_SCOPE("reorder.reorder_event.wait");
         reorder_event.wait_and_throw();
     }
     return true;
@@ -3716,6 +3768,7 @@ static bool reorder_qw_q4_k(uint8_t * data_device, size_t size, size_t offset, d
     sycl::event copy_event;
     SYCL_CHECK(CHECK_TRY_ERROR(copy_event = stream->memcpy(tmp_buf, data_device, size)));
     if (!g_ggml_sycl_use_async_mem_op) {
+        GGML_SYCL_TRACE_SCOPE("reorder.copy_event.wait");
         copy_event.wait();
     }
 
@@ -3738,6 +3791,7 @@ static bool reorder_qw_q4_k(uint8_t * data_device, size_t size, size_t offset, d
         dm_ptr[ib] = x[ib].dm;
     });
     if (!g_ggml_sycl_use_async_mem_op) {
+        GGML_SYCL_TRACE_SCOPE("reorder.reorder_event.wait");
         reorder_event.wait_and_throw();
     }
     return true;
@@ -3759,6 +3813,7 @@ static bool reorder_qw_q4_k_moe(uint8_t * data_device, size_t expert_bytes, int6
     sycl::event copy_event;
     SYCL_CHECK(CHECK_TRY_ERROR(copy_event = stream->memcpy(tmp_buf, data_device, total_bytes)));
     if (!g_ggml_sycl_use_async_mem_op) {
+        GGML_SYCL_TRACE_SCOPE("reorder.copy_event.wait");
         copy_event.wait();
     }
 
@@ -3783,6 +3838,7 @@ static bool reorder_qw_q4_k_moe(uint8_t * data_device, size_t expert_bytes, int6
         dm_ptr[ib] = x[ib].dm;
     });
     if (!g_ggml_sycl_use_async_mem_op) {
+        GGML_SYCL_TRACE_SCOPE("reorder.reorder_event.wait");
         reorder_event.wait_and_throw();
     }
     return true;
@@ -3804,6 +3860,7 @@ static bool reorder_qw_q5_k_moe(uint8_t * data_device, size_t expert_bytes, int6
     sycl::event copy_event;
     SYCL_CHECK(CHECK_TRY_ERROR(copy_event = stream->memcpy(tmp_buf, data_device, total_bytes)));
     if (!g_ggml_sycl_use_async_mem_op) {
+        GGML_SYCL_TRACE_SCOPE("reorder.copy_event.wait");
         copy_event.wait();
     }
 
@@ -3832,6 +3889,7 @@ static bool reorder_qw_q5_k_moe(uint8_t * data_device, size_t expert_bytes, int6
         dm_ptr[ib] = x[ib].dm;
     });
     if (!g_ggml_sycl_use_async_mem_op) {
+        GGML_SYCL_TRACE_SCOPE("reorder.reorder_event.wait");
         reorder_event.wait_and_throw();
     }
     return true;
@@ -3853,6 +3911,7 @@ static bool reorder_qw_q6_k_moe(uint8_t * data_device, size_t expert_bytes, int6
     sycl::event copy_event;
     SYCL_CHECK(CHECK_TRY_ERROR(copy_event = stream->memcpy(tmp_buf, data_device, total_bytes)));
     if (!g_ggml_sycl_use_async_mem_op) {
+        GGML_SYCL_TRACE_SCOPE("reorder.copy_event.wait");
         copy_event.wait();
     }
 
@@ -3881,6 +3940,7 @@ static bool reorder_qw_q6_k_moe(uint8_t * data_device, size_t expert_bytes, int6
         d_ptr[ib] = x[ib].d;
     });
     if (!g_ggml_sycl_use_async_mem_op) {
+        GGML_SYCL_TRACE_SCOPE("reorder.reorder_event.wait");
         reorder_event.wait_and_throw();
     }
     return true;
@@ -3902,6 +3962,7 @@ static bool reorder_qw_q3_k(uint8_t * data_device, size_t size, size_t offset, d
     sycl::event copy_event;
     SYCL_CHECK(CHECK_TRY_ERROR(copy_event = stream->memcpy(tmp_buf, data_device, size)));
     if (!g_ggml_sycl_use_async_mem_op) {
+        GGML_SYCL_TRACE_SCOPE("reorder.copy_event.wait");
         copy_event.wait();
     }
 
@@ -3929,6 +3990,7 @@ static bool reorder_qw_q3_k(uint8_t * data_device, size_t size, size_t offset, d
         d_ptr[ib] = x[ib].d;
     });
     if (!g_ggml_sycl_use_async_mem_op) {
+        GGML_SYCL_TRACE_SCOPE("reorder.reorder_event.wait");
         reorder_event.wait_and_throw();
     }
     return true;
@@ -3950,6 +4012,7 @@ static bool reorder_qw_q5_k(uint8_t * data_device, size_t size, size_t offset, d
     sycl::event copy_event;
     SYCL_CHECK(CHECK_TRY_ERROR(copy_event = stream->memcpy(tmp_buf, data_device, size)));
     if (!g_ggml_sycl_use_async_mem_op) {
+        GGML_SYCL_TRACE_SCOPE("reorder.copy_event.wait");
         copy_event.wait();
     }
 
@@ -3977,6 +4040,7 @@ static bool reorder_qw_q5_k(uint8_t * data_device, size_t size, size_t offset, d
         dm_ptr[ib] = x[ib].dm;
     });
     if (!g_ggml_sycl_use_async_mem_op) {
+        GGML_SYCL_TRACE_SCOPE("reorder.reorder_event.wait");
         reorder_event.wait_and_throw();
     }
     return true;
@@ -3998,6 +4062,7 @@ static bool reorder_qw_q6_k(uint8_t * data_device, size_t size, size_t offset, d
     sycl::event copy_event;
     SYCL_CHECK(CHECK_TRY_ERROR(copy_event = stream->memcpy(tmp_buf, data_device, size)));
     if (!g_ggml_sycl_use_async_mem_op) {
+        GGML_SYCL_TRACE_SCOPE("reorder.copy_event.wait");
         copy_event.wait();
     }
 
@@ -4030,6 +4095,7 @@ static bool reorder_qw_q6_k(uint8_t * data_device, size_t size, size_t offset, d
         dm_ptr[ib] = x[ib].d;
     });
     if (!g_ggml_sycl_use_async_mem_op) {
+        GGML_SYCL_TRACE_SCOPE("reorder.reorder_event.wait");
         reorder_event.wait_and_throw();
     }
     return true;
@@ -5104,7 +5170,10 @@ static void ggml_backend_sycl_synchronize(ggml_backend_t backend) try {
     GGML_SYCL_DEBUG("[SYCL] call %s\n", __func__);
     ggml_backend_sycl_context * sycl_ctx = (ggml_backend_sycl_context *)backend->context;
     const queue_ptr stream = sycl_ctx->stream(sycl_ctx->device, 0);
-    SYCL_CHECK(CHECK_TRY_ERROR((stream)->wait()));
+    {
+        GGML_SYCL_TRACE_SCOPE("synchronize.stream.wait");
+        SYCL_CHECK(CHECK_TRY_ERROR((stream)->wait()));
+    }
 
     GGML_UNUSED(backend);
 }

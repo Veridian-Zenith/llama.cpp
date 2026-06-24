@@ -14,6 +14,7 @@
 #define GGML_SYCL_COMMON_HPP
 
 #include <cstddef>
+#include <chrono>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -59,6 +60,7 @@ void ggml_sycl_host_free(void* ptr);
 
 
 extern int g_ggml_sycl_debug;
+extern int g_ggml_sycl_trace;
 extern int g_ggml_sycl_disable_optimize;
 extern int g_ggml_sycl_prioritize_dmmv;
 extern int g_ggml_sycl_enable_flash_attention;
@@ -78,6 +80,45 @@ extern int g_ggml_sycl_dev2dev_memcpy;
     do {                                  \
         if (UNLIKELY(g_ggml_sycl_debug))  \
             fprintf(stderr, __VA_ARGS__); \
+    } while (0)
+
+#define GLUE(a, b) a##b
+#define XGLUE(a, b) GLUE(a, b)
+
+#define GGML_SYCL_TRACE(...)                                                \
+    do {                                                                    \
+        if (UNLIKELY(g_ggml_sycl_trace)) {                                  \
+            fprintf(stderr, "[SYCL_TRACE] [%12lld] ",                       \
+                (long long)std::chrono::duration_cast<std::chrono::nanoseconds>( \
+                    std::chrono::steady_clock::now().time_since_epoch()).count()); \
+            fprintf(stderr, __VA_ARGS__);                                   \
+        }                                                                   \
+    } while (0)
+
+struct sycl_trace_scope {
+    const char* name;
+    decltype(std::chrono::steady_clock::now()) start;
+    sycl_trace_scope(const char* name_) : name(name_), start(std::chrono::steady_clock::now()) {
+        GGML_SYCL_TRACE(">> %s\n", name);
+    }
+    ~sycl_trace_scope() {
+        auto end = std::chrono::steady_clock::now();
+        auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+        GGML_SYCL_TRACE("<< %s  %lld ns\n", name, (long long)ns);
+    }
+};
+
+#define GGML_SYCL_TRACE_SCOPE(name) \
+    sycl_trace_scope XGLUE(_sycl_ts_, __LINE__)(name)
+
+#define GGML_SYCL_TRACE_WAIT(name, expr)                    \
+    do {                                                     \
+        if (UNLIKELY(g_ggml_sycl_trace)) {                   \
+            sycl_trace_scope XGLUE(_sycl_tw_, __LINE__)(name); \
+            expr;                                            \
+        } else {                                             \
+            expr;                                            \
+        }                                                    \
     } while (0)
 
 #define CHECK_TRY_ERROR(expr)                                            \

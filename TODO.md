@@ -156,7 +156,11 @@
 
 ## 11. Sprint 0 Deliverables (Immediate Next Steps)
 
-- [ ] Write a tracing utility that logs every `zeCommandListAppendMemoryCopy`, `zeEventHostSynchronize`, and `q.wait()` call with nanosecond timestamps
+- [x] Write a tracing utility that logs every `zeCommandListAppendMemoryCopy`, `zeEventHostSynchronize`, and `q.wait()` call with nanosecond timestamps
+  - Implemented: `GGML_SYCL_TRACE` env var (0/1), `GGML_SYCL_TRACE(...)` macro, `sycl_trace_scope` RAII class in `common.hpp`
+  - All `.wait()` / `stream->wait()` / `copy_event.wait()` / `reorder_event.wait_and_throw()` call sites in `ggml-sycl.cpp` and `concat.cpp` wrapped with `GGML_SYCL_TRACE_SCOPE`
+  - Level Zero `zeCommandListAppendMemoryCopy` wrapped in `dev2dev_memcpy()` L0 path
+  - Usage: `GGML_SYCL_TRACE=1 ./main ...`
 - [ ] Run trace on a standard LLM inference loop (e.g., llama-7b, prompt=512, gen=128) and produce a flame graph of SYCL vs Level Zero overhead
 - [ ] Open a draft PR with `l0_wrapper.hpp` refactor (refactoring only, no perf changes) to establish code structure and get early maintainer feedback
 - [ ] Report findings on the update-node limitation to Intel Level Zero developers / relevant GitHub issue
