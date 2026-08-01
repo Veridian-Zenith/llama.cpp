@@ -686,19 +686,36 @@ namespace dpct
       /// memory on the SYCL device.
       void get_memory_info(size_t &free_memory, size_t &total_memory) {
         total_memory = get_device_info().get_global_mem_size();
-        const char *warning_info =
-            "get_memory_info: [warning] ext_intel_free_memory is not "
-            "supported (export/set ZES_ENABLE_SYSMAN=1 to support), "
-            "use total memory as free memory";
 #if (defined(__SYCL_COMPILER_VERSION) && __SYCL_COMPILER_VERSION >= 20221105)
         if (!has(sycl::aspect::ext_intel_free_memory)) {
-          std::cerr << warning_info << std::endl;
+          const char *sysman_env = getenv("ZES_ENABLE_SYSMAN");
+          bool sysman_set = sysman_env && sysman_env[0] == '1';
+          static bool warned = false;
+          if (!warned) {
+              if (sysman_set) {
+                  std::cerr << "get_memory_info: ext_intel_free_memory not "
+                      "available for this device (ZES_ENABLE_SYSMAN=1 is set "
+                      "but the driver does not expose this aspect); "
+                      "using total memory as free memory" << std::endl;
+              } else {
+                  std::cerr << "get_memory_info: ext_intel_free_memory not "
+                      "available (set ZES_ENABLE_SYSMAN=1 to enable); "
+                      "using total memory as free memory" << std::endl;
+              }
+              warned = true;
+          }
           free_memory = total_memory;
         } else {
           free_memory = get_info<sycl::ext::intel::info::device::free_memory>();
         }
 #else
-        std::cerr << warning_info << std::endl;
+        static bool warned = false;
+        if (!warned) {
+            std::cerr << "get_memory_info: ext_intel_free_memory not "
+                "supported by this SYCL compiler version; "
+                "using total memory as free memory" << std::endl;
+            warned = true;
+        }
         free_memory = total_memory;
 #if defined(_MSC_VER) && !defined(__clang__)
 #pragma message("Querying the number of bytes of free memory is not supported")

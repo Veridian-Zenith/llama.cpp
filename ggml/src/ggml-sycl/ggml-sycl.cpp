@@ -19,6 +19,7 @@
 #include <cstdlib>
 #include <float.h>
 #include <limits>
+#include <sys/sysinfo.h>
 #include <optional>
 #include <stdint.h>
 #include <stdio.h>
@@ -5261,6 +5262,18 @@ catch (sycl::exception const &exc) {
   std::exit(1);
 }
 
+// Get available system memory.  For integrated GPUs that share system RAM,
+// this is a better proxy for "free device memory" than total VRAM when the
+// SYCL ext_intel_free_memory aspect is not available.
+static size_t ggml_sycl_get_system_available_memory() {
+    struct sysinfo si;
+    if (sysinfo(&si) == 0) {
+        // si.mem_unit can be 1 on some systems; always multiply to be safe.
+        return (size_t)si.freeram * si.mem_unit;
+    }
+    return 0;
+}
+
 void ggml_backend_sycl_get_device_memory(int device, size_t *free,
                                                    size_t *total) try {
     GGML_SYCL_DEBUG("[SYCL] call ggml_backend_sycl_get_device_memory\n");
@@ -5268,6 +5281,17 @@ void ggml_backend_sycl_get_device_memory(int device, size_t *free,
 
     SYCL_CHECK(CHECK_TRY_ERROR(
         dpct::dev_mgr::instance().get_device(device).get_memory_info(*free, *total)));
+
+    // When ext_intel_free_memory is not available, get_memory_info reports
+    // free_memory = total_memory.  For integrated GPUs that share system RAM,
+    // clamp free memory to the system's available RAM so the tensor-split logic
+    // does not overcommit layers to the device.
+    if (*free == *total) {
+        size_t sys_free = ggml_sycl_get_system_available_memory();
+        if (sys_free > 0 && sys_free < *free) {
+            *free = sys_free;
+        }
+    }
 }
 catch (sycl::exception const &exc) {
   std::cerr << exc.what() << "Exception caught at file:" << __FILE__
@@ -5603,6 +5627,17 @@ static void ggml_backend_sycl_device_get_memory(ggml_backend_dev_t dev, size_t *
     ggml_sycl_set_device(ctx->device);
     SYCL_CHECK(CHECK_TRY_ERROR(
     dpct::dev_mgr::instance().get_device(ctx->device).get_memory_info(*free, *total)));
+
+    // When ext_intel_free_memory is not available, get_memory_info reports
+    // free_memory = total_memory.  For integrated GPUs that share system RAM,
+    // clamp free memory to the system's available RAM so the tensor-split logic
+    // does not overcommit layers to the device.
+    if (*free == *total) {
+        size_t sys_free = ggml_sycl_get_system_available_memory();
+        if (sys_free > 0 && sys_free < *free) {
+            *free = sys_free;
+        }
+    }
 }
 
 static enum ggml_backend_dev_type ggml_backend_sycl_device_get_type(ggml_backend_dev_t dev) {

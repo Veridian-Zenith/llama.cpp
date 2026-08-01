@@ -94,9 +94,27 @@ static bool ggml_sycl_use_level_zero_device_alloc(sycl::queue &q) {
 
 // Use Level Zero zeMemAllocDevice to avoid sycl::malloc_device triggering
 // DMA-buf/TTM system RAM staging in the xe kernel driver during multi-GPU inference.
+//
+// For integrated GPUs there is no device-local memory - everything is system DDR.
+// zeMemAllocDevice on iGPU exhausts the driver's internal tracking resources
+// and causes UR_RESULT_ERROR_OUT_OF_DEVICE_MEMORY on subsequent operations.
+// Use sycl::malloc_shared instead, which maps to zeMemAllocShared and lets the
+// driver manage the shared memory without a separate device memory pool.
 void * ggml_sycl_malloc_device(size_t size, sycl::queue &q) {
 #ifdef GGML_SYCL_SUPPORT_LEVEL_ZERO_API
     if (ggml_sycl_use_level_zero_device_alloc(q)) {
+        // Integrated GPUs have no dedicated VRAM; use shared allocations.
+        // zeMemAllocDevice on iGPU exhausts the driver's internal tracking
+        // resources, causing UR_RESULT_ERROR_OUT_OF_DEVICE_MEMORY on memcpy.
+        if (q.get_device().has(sycl::aspect::ext_oneapi_is_integrated_gpu)) {
+            void *ptr = sycl::malloc_shared(size, q);
+            if (ptr) {
+                return ptr;
+            }
+            GGML_LOG_WARN("%s: sycl::malloc_shared of %zu bytes failed, falling back to sycl::malloc_device\n", __func__, size);
+            return sycl::malloc_device(size, q);
+        }
+
         void *ptr = nullptr;
         auto ze_ctx = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(q.get_context());
         auto ze_dev = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(q.get_device());
@@ -119,7 +137,8 @@ void * ggml_sycl_malloc_device(size_t size, sycl::queue &q) {
         if (r == ZE_RESULT_SUCCESS && ptr) {
             return ptr;
         }
-        return nullptr;
+        GGML_LOG_WARN("%s: Level Zero device allocation of %zu bytes failed (r=%d), falling back to SYCL malloc_device\n", __func__, size, r);
+        // Fall through to sycl::malloc_device below
     }
 #endif
     return sycl::malloc_device(size, q);
@@ -130,8 +149,12 @@ void ggml_sycl_free_device(void *ptr, sycl::queue &q) {
 #ifdef GGML_SYCL_SUPPORT_LEVEL_ZERO_API
     if (ggml_sycl_use_level_zero_device_alloc(q)) {
         auto ze_ctx = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(q.get_context());
-        zeMemFree(ze_ctx, ptr);
-        return;
+        ze_result_t r = zeMemFree(ze_ctx, ptr);
+        if (r == ZE_RESULT_SUCCESS) {
+            return;
+        }
+        // zeMemFree failed; the pointer was likely allocated by sycl::malloc_device
+        // as a fallback. Fall through to sycl::free.
     }
 #endif
     SYCL_CHECK(CHECK_TRY_ERROR(sycl::free(ptr, q)));
