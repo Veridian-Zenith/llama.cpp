@@ -1,0 +1,66 @@
+{
+  "version": 4,
+  "configurePresets": [
+    {
+      "name": "local-intel",
+      "displayName": "Local i3-1215U + Alder Lake iGPU (icx, SYCL/OpenCL adapter)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "environment": {
+        "CFLAGS": null,
+        "CXXFLAGS": null,
+        "CPPFLAGS": null,
+        "LDFLAGS": null
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_C_COMPILER": "icx",
+        "CMAKE_CXX_COMPILER": "icpx",
+        "CMAKE_INSTALL_PREFIX": "/usr",
+        "CMAKE_INTERPROCEDURAL_OPTIMIZATION": "ON",
+        "CMAKE_C_FLAGS": "-fno-plt -fstack-protector-strong -fstack-clash-protection -ftrivial-auto-var-init=zero -fcf-protection=full",
+        "CMAKE_CXX_FLAGS": "-fno-plt -fstack-protector-strong -fstack-clash-protection -ftrivial-auto-var-init=zero -fcf-protection=full",
+        "CMAKE_EXE_LINKER_FLAGS": "-fuse-ld=lld -Wl,-O1,-z,relro,-z,now,--icf=all,--gc-sections",
+        "CMAKE_SHARED_LINKER_FLAGS": "-fuse-ld=lld -Wl,-O1,-z,relro,-z,now,--icf=all,--gc-sections",
+        "BUILD_SHARED_LIBS": "ON",
+        "GGML_NATIVE": "ON",
+        "GGML_CPU": "ON",
+        "GGML_OPENMP": "ON",
+        "GGML_LLAMAFILE": "OFF",
+        "GGML_SYCL": "ON",
+        "GGML_SYCL_F16": "ON",
+        "GGML_SYCL_GRAPH": "OFF",
+        "GGML_SYCL_DEVICE_ARCH": "adl_p",
+        "GGML_SYCL_SUPPORT_LEVEL_ZERO_API": "OFF",
+        "GGML_VULKAN": "OFF",
+        "GGML_CUDA": "OFF",
+        "GGML_HIP": "OFF",
+        "GGML_METAL": "OFF",
+        "GGML_BLAS": "OFF",
+        "GGML_OPENCL": "OFF",
+        "GGML_OPENVINO": "OFF",
+        "GGML_RPC": "OFF",
+        "GGML_WEBGPU": "OFF",
+        "LLAMA_BUILD_TESTS": "OFF",
+        "LLAMA_BUILD_EXAMPLES": "OFF",
+        "LLAMA_BUILD_TOOLS": "OFF",
+        "LLAMA_BUILD_SERVER": "ON",
+        "LLAMA_BUILD_APP": "OFF",
+        "LLAMA_BUILD_COMMON": "ON",
+        "LLAMA_BUILD_UI": "OFF",
+        "LLAMA_USE_PREBUILT_UI": "OFF",
+        "LLAMA_BUILD_MTMD": "OFF",
+        "LLAMA_BUILD_BORINGSSL": "ON",
+        "LLAMA_ALL_WARNINGS": "OFF",
+        "GGML_BUILD_EXAMPLES": "OFF"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "local-intel",
+      "configurePreset": "local-intel",
+      "jobs": 8
+    }
+  ]
+}
