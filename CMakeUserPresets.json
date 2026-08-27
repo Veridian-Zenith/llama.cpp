@@ -29,9 +29,8 @@
         "GGML_LLAMAFILE": "OFF",
         "GGML_SYCL": "ON",
         "GGML_SYCL_F16": "ON",
-        "GGML_SYCL_GRAPH": "OFF",
-        "GGML_SYCL_DEVICE_ARCH": "adl_p",
-        "GGML_SYCL_SUPPORT_LEVEL_ZERO_API": "OFF",
+        "GGML_SYCL_GRAPH": "ON",
+        "GGML_SYCL_SUPPORT_LEVEL_ZERO_API": "ON",
         "GGML_VULKAN": "OFF",
         "GGML_CUDA": "OFF",
         "GGML_HIP": "OFF",
@@ -43,16 +42,16 @@
         "GGML_WEBGPU": "OFF",
         "LLAMA_BUILD_TESTS": "OFF",
         "LLAMA_BUILD_EXAMPLES": "OFF",
-        "LLAMA_BUILD_TOOLS": "OFF",
         "LLAMA_BUILD_SERVER": "ON",
-        "LLAMA_BUILD_APP": "OFF",
+        "LLAMA_BUILD_APP": "ON",
         "LLAMA_BUILD_COMMON": "ON",
         "LLAMA_BUILD_UI": "OFF",
         "LLAMA_USE_PREBUILT_UI": "OFF",
         "LLAMA_BUILD_MTMD": "OFF",
         "LLAMA_BUILD_BORINGSSL": "ON",
         "LLAMA_ALL_WARNINGS": "OFF",
-        "GGML_BUILD_EXAMPLES": "OFF"
+        "GGML_BUILD_EXAMPLES": "OFF",
+	"GGML_SYCL_HOST_MEM_FALLBACK": "ON"
       }
     }
   ],

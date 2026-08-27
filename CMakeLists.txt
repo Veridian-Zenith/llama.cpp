@@ -1,5 +1,12 @@
 cmake_minimum_required(VERSION 3.14...3.28) # for add_link_options and implicit target directories.
 project("llama.cpp" C CXX)
+
+set(CMAKE_C_FLAGS "" CACHE STRING "" FORCE)
+set(CMAKE_CXX_FLAGS "" CACHE STRING "" FORCE)
+set(CMAKE_EXE_LINKER_FLAGS "" CACHE STRING "" FORCE)
+set(CMAKE_SHARED_LINKER_FLAGS "" CACHE STRING "" FORCE)
+set(CMAKE_MODULE_LINKER_FLAGS "" CACHE STRING "" FORCE)
+
 include(CheckIncludeFileCXX)
 
 #set(CMAKE_WARN_DEPRECATED YES)
