@@ -30,13 +30,15 @@
         "GGML_SYCL": "ON",
         "GGML_SYCL_F16": "ON",
         "GGML_SYCL_GRAPH": "ON",
-        "GGML_SYCL_SUPPORT_LEVEL_ZERO_API": "ON",
+        "GGML_SYCL_SUPPORT_LEVEL_ZERO_API": "OFF",
         "GGML_VULKAN": "OFF",
         "GGML_CUDA": "OFF",
         "GGML_HIP": "OFF",
         "GGML_METAL": "OFF",
-        "GGML_BLAS": "OFF",
+        "GGML_BLAS": "ON",
+	"GGML_BLAS_VENDOR": "Intel10_64_dyn",
         "GGML_OPENCL": "OFF",
+        "GGML_OPENCL_USE_ADRENO_KERNELS": "OFF",
         "GGML_OPENVINO": "OFF",
         "GGML_RPC": "OFF",
         "GGML_WEBGPU": "OFF",
@@ -51,7 +53,8 @@
         "LLAMA_BUILD_BORINGSSL": "ON",
         "LLAMA_ALL_WARNINGS": "OFF",
         "GGML_BUILD_EXAMPLES": "OFF",
-	"GGML_SYCL_HOST_MEM_FALLBACK": "ON"
+	"GGML_SYCL_HOST_MEM_FALLBACK": "ON",
+	"GGML_SYCL_DEVICE_ARCH": "adl"
       }
     }
   ],
