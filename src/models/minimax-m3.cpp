@@ -13,7 +13,7 @@
 void llama_model_minimax_m3::load_arch_hparams(llama_model_loader & ml) {
     ml.get_key(LLM_KV_ATTENTION_LAYERNORM_RMS_EPS, hparams.f_norm_rms_eps);
     ml.get_key(LLM_KV_LEADING_DENSE_BLOCK_COUNT,   hparams.n_layer_dense_lead, false);
-    ml.get_key(LLM_KV_EXPERT_FEED_FORWARD_LENGTH,  hparams.n_ff_exp);
+    ml.get_key_or_arr(LLM_KV_EXPERT_FEED_FORWARD_LENGTH, hparams.n_ff_exp_arr, hparams.n_layer_all);
     ml.get_key(LLM_KV_EXPERT_SHARED_COUNT,         hparams.n_expert_shared);
     ml.get_key(LLM_KV_EXPERT_WEIGHTS_SCALE,        hparams.expert_weights_scale, false);
     ml.get_key(LLM_KV_EXPERT_WEIGHTS_NORM,         hparams.expert_weights_norm, false);
@@ -25,6 +25,8 @@ void llama_model_minimax_m3::load_arch_hparams(llama_model_loader & ml) {
     ml.get_key(LLM_KV_ATTENTION_INDEXER_LOCAL_BLOCKS,  hparams.indexer_local_blocks);
     msa_p = { (int) hparams.indexer_block_size, (int) hparams.indexer_top_k, (int) hparams.indexer_local_blocks };
 
+    GGML_ASSERT(hparams.indexer_block_size > 0); // avoid div by zero
+
     switch (hparams.n_layer()) {
         case 60: type = LLM_TYPE_428B_A23B; break;
         default: type = LLM_TYPE_UNKNOWN;
@@ -34,7 +36,7 @@ void llama_model_minimax_m3::load_arch_hparams(llama_model_loader & ml) {
 void llama_model_minimax_m3::load_arch_tensors(llama_model_loader &) {
     LLAMA_LOAD_LOCALS;
     const int64_t n_expert_shared = hparams.n_expert_shared;
-    const int64_t n_ff_exp        = hparams.n_ff_exp;
+    const int64_t n_ff_exp        = hparams.n_ff_exp();
 
     tok_embd = create_tensor(tn(LLM_TENSOR_TOKEN_EMBD, "weight"), {n_embd, n_vocab}, 0);
 
@@ -213,7 +215,9 @@ llama_model_minimax_m3::graph::graph(const llama_model & model, const llm_graph_
     inpL = build_inp_embd(model.tok_embd);
 
     ggml_tensor * inp_pos = build_inp_pos();
-    auto inp_attn = build_attn_inp_kv_msa();
+
+    // ==========================================
+    // TODO: avoid such kind of complexity in the model graphs
 
     // MSA calls ggml_flash_attn_ext directly and assumes the non-transposed V layout that
     // llama.cpp only provides when flash attention is enabled. Block selection is anchored
@@ -224,6 +228,8 @@ llama_model_minimax_m3::graph::graph(const llama_model & model, const llm_graph_
     const bool fa_on       = cparams.flash_attn;
     const bool streams_ok  = cparams.n_seq_max == 1 || !cparams.kv_unified;
     const bool msa_enabled = fa_on && streams_ok;
+
+    auto * inp_attn = build_attn_inp_kv_msa(msa_enabled);
 
     static bool warned_no_fa = false;
     if (!fa_on && !warned_no_fa) {
@@ -237,6 +243,7 @@ llama_model_minimax_m3::graph::graph(const llama_model & model, const llm_graph_
                        "-> running DENSE attention. Output may be degraded. Drop --kv-unified to enable MSA.\n", __func__);
         warned_unified = true;
     }
+    // ==========================================
 
     // hoisted per-graph MSA state (shared by every sparse layer)
     llm_graph_input_msa * msa = nullptr;
