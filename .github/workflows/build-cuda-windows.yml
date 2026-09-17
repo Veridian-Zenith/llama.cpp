@@ -23,7 +23,7 @@ env:
 jobs:
   cuda:
     name: windows-cuda (${{ matrix.cuda }}, ${{ matrix.arch }})
-    runs-on: windows-2022
+    runs-on: windows-latest
 
     permissions:
       actions: write
@@ -82,7 +82,7 @@ jobs:
           key: release-windows-2022-${{ matrix.arch }}-cuda-${{ matrix.cuda }}
 
   hip:
-    runs-on: windows-2022
+    runs-on: windows-latest
 
     permissions:
       actions: write

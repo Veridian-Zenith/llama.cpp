@@ -36,7 +36,7 @@ env:
 
 jobs:
   windows-2025-opencl-adreno:
-    runs-on: windows-2025
+    runs-on: windows-latest
 
     steps:
       - name: Clone

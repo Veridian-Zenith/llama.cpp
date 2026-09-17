@@ -44,7 +44,7 @@ jobs:
           - build: fp16
             fp16: ON
 
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
 
     env:
       ONEAPI_ROOT: /opt/intel/oneapi/
@@ -117,7 +117,7 @@ jobs:
           save: true
 
   windows-latest-sycl:
-    runs-on: windows-2022
+    runs-on: windows-latest
 
     defaults:
       run:

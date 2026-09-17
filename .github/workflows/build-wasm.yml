@@ -46,7 +46,7 @@ env:
 
 jobs:
   ubuntu-webgpu:
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-latest-arm
 
     steps:
       - name: Clone

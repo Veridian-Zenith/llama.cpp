@@ -37,7 +37,7 @@ env:
 
 jobs:
   cuda:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     container: nvidia/cuda:12.6.2-devel-ubuntu24.04
 
     steps:
@@ -93,7 +93,7 @@ jobs:
           save: true
 
   hip:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     container: rocm/dev-ubuntu-22.04:6.1.2
 
     steps:
@@ -144,7 +144,7 @@ jobs:
           save: true
 
   musa:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     container: mthreads/musa:rc4.3.0-devel-ubuntu22.04-amd64
 
     steps:

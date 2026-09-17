@@ -21,7 +21,7 @@ env:
 
 jobs:
   windows-msys2:
-    runs-on: windows-2025
+    runs-on: windows-latest
 
     strategy:
       fail-fast: false

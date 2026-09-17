@@ -38,7 +38,7 @@ env:
 
 jobs:
   ubuntu-22-hip-quality-check:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     container: rocm/dev-ubuntu-22.04:7.2.1
     steps:
       - name: Clone
